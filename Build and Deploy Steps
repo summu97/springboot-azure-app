@@ -1,0 +1,44 @@
+
+-----------------------------------
+git clone https://github.com/summu97/springboot-azure-app.git
+cd springboot-azure-app
+-----------------------------------
+sudo vim build.gradle
+
+
+
+Build and Run
+Inatall gradle:
+sudo apt update
+# Download Gradle 8.7 (latest stable as of now)
+wget https://services.gradle.org/distributions/gradle-8.7-bin.zip -P /tmp
+
+# Unzip it to /opt/gradle
+sudo unzip -d /opt/gradle /tmp/gradle-8.7-bin.zip
+
+# Set environment variable (you can use ~/.zshrc or ~/.bashrc depending on your shell)
+echo 'export PATH=$PATH:/opt/gradle/gradle-8.7/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify installation
+gradle -v
+
+
+
+# Build jar
+gradle clean build
+
+# Build Docker image
+sudo docker build -t userregacr.azurecr.io/springboot-azure-app:latest .
+
+sudo az login
+
+sudo az acr login --name userregacr
+
+
+
+sudo docker push userregacr.azurecr.io/springboot-azure-app:latest
+
+kubectl apply -f deployment.yaml
+kubectl get pods
+kubectl logs <pod-name>
