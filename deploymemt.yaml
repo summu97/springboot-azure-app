@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-springboot-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azure-springboot-app
+  template:
+    metadata:
+      labels:
+        app: azure-springboot-app
+    spec:
+      containers:
+        - name: azure-springboot-app
+          image: userregacr.azurecr.io/springboot-azure-app:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+
