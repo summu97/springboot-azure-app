@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: azure-springboot-app
+  namespace: springboot
 spec:
   replicas: 1
   selector:
@@ -12,6 +13,7 @@ spec:
       labels:
         app: azure-springboot-app
     spec:
+      serviceAccountName: springboot-sa        # <-- add this line
       containers:
         - name: azure-springboot-app
           image: userregacr.azurecr.io/springboot-azure-app:latest
@@ -20,4 +22,3 @@ spec:
           resources:
             limits:
               cpu: "1"
-
