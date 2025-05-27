@@ -42,3 +42,224 @@ sudo docker push userregacr.azurecr.io/springboot-azure-app:latest
 kubectl apply -f deployment.yaml
 kubectl get pods
 kubectl logs <pod-name>
+----------------------------------
+Pods Accessing Key Vault with Their Own Identity:
+You’ll achieve this by:
+
+Creating a User Assigned Managed Identity (UAMI)
+
+Granting it access to Azure Key Vault
+
+Annotating your Kubernetes Service Account (KSA) to federate with the UAMI
+
+Configuring your pod to use that KSA
+
+Your app (e.g. Spring Boot) uses DefaultAzureCredential, which now uses the pod identity.
+
+🛠️ Step-by-Step Setup: Azure Workload Identity in AKS
+🔁 Prerequisite: Enable Workload Identity in your AKS Cluster
+az aks update \
+  --name <aks-cluster-name> \
+  --resource-group <resource-group> \
+  --enable-oidc-issuer \
+  --enable-workload-identity
+
+EX:
+az aks update \
+  --name UserRegistrationAKSCluster-dev \
+  --resource-group RG-AzureProject-dev \
+  --enable-oidc-issuer \
+  --enable-workload-identity
+
+1️⃣ Create a User Assigned Managed Identity (UAMI)
+az identity create \
+  --name springboot-pod-identity \
+  --resource-group <resource-group> \
+  --location <location>
+
+EX:
+az identity create \
+  --name springboot-pod-identity \
+  --resource-group RG-AzureProject-dev \
+  --location eastus
+
+Save:
+ClientID : 7026369d-fb22-41a5-b32e-931c170f55e9
+principalId: 79d9537c-70bd-4767-9c90-8e1c895655c4
+resourceId: /subscriptions/db75716a-bc0d-4d76-872c-0c6179241fc3/resourcegroups/RG-AzureProject-dev/providers/Microsoft.ManagedIdentity/userAssignedIdentities/springboot-pod-identity
+
+2️⃣ Grant the UAMI Access to Key Vault
+az role assignment create \
+  --assignee <clientId> \
+  --role "Key Vault Secrets User" \
+  --scope $(az keyvault show --name <keyvault-name> --query id -o tsv)
+
+EX:
+az role assignment create \
+  --assignee 7026369d-fb22-41a5-b32e-931c170f55e9 \
+  --role "Key Vault Secrets User" \
+  --scope $(az keyvault show --name UserRegistrationVault --query id -o tsv)
+
+3️⃣ Create Kubernetes Namespace and Service Account
+kubectl create namespace <namespace>
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: springboot-sa
+  namespace: <namespace>
+  annotations:
+    azure.workload.identity/client-id: <clientId-of-uami>
+EOF
+
+EX:
+kubectl create namespace springboot
+
+sudo vim springboot-svc-account.yaml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: springboot-sa
+  namespace: springboot
+  annotations:
+    azure.workload.identity/client-id: 7026369d-fb22-41a5-b32e-931c170f55e9
+
+
+kubectl apply -f springboot-svc-account.yaml
+
+4️⃣ Federate the Service Account with the Managed Identity
+az identity federated-credential create \
+  --name springboot-federation \
+  --identity-name springboot-pod-identity \
+  --resource-group <resource-group> \
+  --issuer "$(az aks show --name <aks-cluster-name> --resource-group <resource-group> --query "oidcIssuerProfile.issuerUrl" -o tsv)" \
+  --subject "system:serviceaccount:myapp:springboot-sa"
+
+EX:
+az identity federated-credential create \
+  --name springboot-federation \
+  --identity-name springboot-pod-identity \
+  --resource-group RG-AzureProject-dev \
+  --issuer "$(az aks show --name UserRegistrationAKSCluster-dev --resource-group RG-AzureProject-dev --query "oidcIssuerProfile.issuerUrl" -o tsv)" \
+  --subject "system:serviceaccount:myapp:springboot-sa"
+
+5️⃣ Deploy the Spring Boot Pod with the Service Account
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-springboot-app
+  namespace: myapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azure-springboot-app
+  template:
+    metadata:
+      labels:
+        app: azure-springboot-app
+    spec:
+      serviceAccountName: springboot-sa
+      containers:
+      - name: app
+        image: <your-image>
+        env:
+        - name: AZURE_CLIENT_ID
+          value: <clientId-of-uami>  # Optional: helps DefaultAzureCredential pick the right one
+--------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-springboot-app
+  namespace: springboot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azure-springboot-app
+  template:
+    metadata:
+      labels:
+        app: azure-springboot-app
+    spec:
+      serviceAccountName: springboot-sa        # <-- add this line
+      containers:
+        - name: azure-springboot-app
+          image: userregacr.azurecr.io/springboot-azure-app:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+------------------------------
+gradle clean build
+sudo docker build -t userregacr.azurecr.io/springboot-azure-app:latest .
+sudo az acr login --name userregacr
+sudo docker push userregacr.azurecr.io/springboot-azure-app:latest
+kubectl apply -f deployment.yaml
+kubectl get po -n springboot
+========================================
+
+
+For debugging:
+Create a pod YAML on the fly and apply it
+sudo vim debug-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug
+  namespace: springboot
+spec:
+  serviceAccountName: springboot-sa
+  containers:
+  - name: azure-cli
+    image: mcr.microsoft.com/azure-cli
+    command: ["sleep", "3600"]
+  restartPolicy: Never
+
+
+kubectl apply -f debug-pod.yaml
+kubectl exec -it debug -n springboot -- bash
+
+
+az login --identity
+az keyvault secret show --vault-name <your-keyvault-name> --name <your-secret-name>
+
+EX:
+az keyvault secret show --vault-name UserRegistrationVault --name sql-db-url
+
+------------------
+ sudo cat src/main/java/com/example/azureapp/AzureSqlConnectorApp.java 
+package com.example.azureapp;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import javax.annotation.PostConstruct;
+
+@SpringBootApplication
+public class AzureSqlConnectorApp {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    public static void main(String[] args) {
+        SpringApplication.run(AzureSqlConnectorApp.class, args);
+    }
+
+    @PostConstruct
+    public void runQuery() {
+        try {
+            Integer result = jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+            System.out.println("✅ Connected! Query result = " + result);
+        } catch (Exception e) {
+            System.err.println("❌ DB Connection failed:");
+            e.printStackTrace();
+        }
+    }
+}
