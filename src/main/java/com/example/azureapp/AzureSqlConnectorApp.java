@@ -1,45 +1,45 @@
 package com.example.azureapp;
 
-import com.example.azureapp.config.SecretManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.annotation.PostConstruct;
-import java.sql.Connection;
-import java.sql.DriverManager;
 
 @SpringBootApplication
 public class AzureSqlConnectorApp {
 
     @Autowired
-    private SecretManager secretManager;
+    private JdbcTemplate jdbcTemplate;
 
-    @Value("${azure.keyvault.secret.username}")
-    private String usernameSecretName;
+    // ✅ Inject values from Key Vault (or fallback)
+    @Value("${spring.datasource.url}")
+    private String dbUrl;
 
-    @Value("${azure.keyvault.secret.password}")
-    private String passwordSecretName;
+    @Value("${spring.datasource.username}")
+    private String dbUser;
 
-    @Value("${azure.keyvault.secret.dburl}")
-    private String dbUrlSecretName;
+    @Value("${spring.datasource.password}")
+    private String dbPass;
 
     public static void main(String[] args) {
         SpringApplication.run(AzureSqlConnectorApp.class, args);
     }
 
     @PostConstruct
-    public void init() {
-        try {
-            String username = secretManager.getSecret(usernameSecretName);
-            String password = secretManager.getSecret(passwordSecretName);
-            String dbUrl = secretManager.getSecret(dbUrlSecretName);
+    public void runQuery() {
+        // ✅ Print resolved values to verify if Key Vault worked
+        System.out.println("Resolved DB URL: " + dbUrl);
+        System.out.println("DB Username: " + dbUser);
+        System.out.println("DB Password: " + dbPass);
 
-            Connection conn = DriverManager.getConnection(dbUrl, username, password);
-            System.out.println("✅ Connected to Azure SQL DB successfully!");
-            conn.close();
+        try {
+            Integer result = jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+            System.out.println("✅ Connected! Query result = " + result);
         } catch (Exception e) {
+            System.err.println("❌ DB Connection failed:");
             e.printStackTrace();
         }
     }
