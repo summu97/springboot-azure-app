@@ -4,13 +4,21 @@ import com.azure.identity.ManagedIdentityCredentialBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import com.azure.security.keyvault.secrets.models.KeyVaultSecret;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
+
+@Component
 public class SecretManager {
 
-    private final SecretClient client;
+    @Value("${azure.keyvault.url}")
+    private String keyVaultUrl;
 
-    public SecretManager() {
-        String keyVaultUrl = "https://userregistrationvault.vault.azure.net/";
+    private SecretClient client;
+
+    @PostConstruct
+    public void init() {
         client = new SecretClientBuilder()
                 .vaultUrl(keyVaultUrl)
                 .credential(new ManagedIdentityCredentialBuilder().build())
@@ -22,4 +30,3 @@ public class SecretManager {
         return secret.getValue();
     }
 }
-
